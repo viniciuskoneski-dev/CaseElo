@@ -1,138 +1,174 @@
 import streamlit as st
 import pandas as pd
-import datetime
+from datetime import datetime
 
-# Configuração da página
-st.set_page_config(page_title="EloGroup - Sistema de Reembolso", layout="wide")
+# ==========================================
+# Configuração e Banco de Dados Temporário
+# ==========================================
+st.set_page_config(page_title="Sistema de Reembolso EloGroup", page_icon="💸", layout="wide")
 
-# Inicializando um "banco de dados" em memória (simulado via session_state)
-if 'db' not in st.session_state:
-    st.session_state.db = pd.DataFrame(columns=[
-        "ID", "Colaborador", "Centro_Custo", "Data_Despesa", "Valor", "Status"
+# Inicializando o "banco de dados" na sessão para manter os registros entre as abas
+if 'banco_reembolsos' not in st.session_state:
+    st.session_state['banco_reembolsos'] = pd.DataFrame(columns=[
+        "ID", "Colaborador", "Centro de Custo", "Data Despesa", "Tipo", 
+        "Descrição", "Valor", "Comprovante", "Status"
     ])
-    st.session_state.next_id = 1
 
-# Barra Lateral - Simulação de Perfis de Usuário
-st.sidebar.title("Navegação")
-perfil = st.sidebar.selectbox(
-    "Acessar o sistema como:",
-    ["Colaborador", "Técnico Administrativo", "Gestor", "Financeiro"]
+# ==========================================
+# Navegação Lateral (Simulando Perfis)
+# ==========================================
+st.sidebar.title("Navegação de Perfis")
+st.sidebar.markdown("Selecione sua visão para testar o fluxo completo.")
+perfil_selecionado = st.sidebar.radio("Acessar como:", 
+    ["1. Colaborador (Solicitante)", 
+     "2. Gestor (Aprovação)", 
+     "3. Técnico Administrativo (Conformidade)", 
+     "4. Financeiro (Pagamento)"]
 )
 
-st.title(f"Portal de Reembolsos - Visão: {perfil}")
+st.sidebar.divider()
+st.sidebar.markdown("**Métricas do Sistema:**")
+st.sidebar.metric("Total de Solicitações", len(st.session_state['banco_reembolsos']))
 
-# -------------------------------------------------------------
-# VISÃO: COLABORADOR
-# -------------------------------------------------------------
-if perfil == "Colaborador":
-    st.header("Nova Solicitação de Reembolso")
+# ==========================================
+# TELA 1: COLABORADOR
+# ==========================================
+if perfil_selecionado == "1. Colaborador (Solicitante)":
+    st.title("💸 Nova Solicitação de Reembolso")
+    st.markdown("Preencha os dados abaixo. O formulário não apagará seus dados em caso de erro.")
     
-    with st.form("form_reembolso", clear_on_submit=True):
-        nome = st.text_input("Nome do Colaborador")
-        centro_custo = st.text_input("Centro de Custo (Ex: Projeto X)")
-        
+    # clear_on_submit=False mantém os dados preenchidos
+    with st.form(key="form_colaborador", clear_on_submit=False):
         col1, col2 = st.columns(2)
         with col1:
-            data_despesa = st.date_input("Data da Despesa")
+            nome = st.text_input("Nome do Colaborador *")
+            centro_custo = st.text_input("Centro de Custo (ID do Projeto) *")
+            data_despesa = st.date_input("Data da Despesa *")
         with col2:
-            valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
-            
-        comprovante = st.file_uploader("Anexar Comprovante (PDF/Imagem)")
+            valor = st.number_input("Valor (R$) *", min_value=0.0, format="%.2f")
+            tipo_despesa = st.selectbox("Tipo de Despesa *", 
+                ["1 - Transporte", "2 - Refeições", "3 - Gráfica e material", "4 - Outros (especificar na descrição)"])
         
-        submit = st.form_submit_button("Enviar Solicitação")
+        descricao = st.text_input("Descrição e Observações *")
+        comprovante = st.file_uploader("Anexar Comprovante Fiscal *", type=["pdf", "png", "jpg"])
         
-        if submit:
-            # CHECAGEM AUTOMÁTICA: Regra dos 90 dias
-            dias_passados = (datetime.date.today() - data_despesa).days
+        submit_btn = st.form_submit_button("Enviar Solicitação")
+        
+    if submit_btn:
+        erros = []
+        if not nome.strip(): erros.append("Nome é obrigatório.")
+        if not centro_custo.strip(): erros.append("Centro de Custo é obrigatório.")
+        if valor <= 0: erros.append("O valor deve ser maior que zero.")
+        if not descricao.strip(): erros.append("A descrição é obrigatória.")
+        if not comprovante: erros.append("O comprovante é obrigatório para conformidade.")
+        if tipo_despesa.startswith("4") and len(descricao.strip()) < 5:
+            erros.append("Ao selecionar 'Outros', detalhe a despesa na descrição.")
             
-            if dias_passados > 90:
-                st.error("ERRO: A política da empresa não permite reembolso de despesas com mais de 90 dias.")
-            elif not comprovante:
-                st.error("ERRO: O anexo do comprovante é obrigatório.")
-            elif not nome or not centro_custo:
-                st.warning("Preencha todos os campos.")
-            else:
-                # Salva no "banco de dados"
-                novo_registro = {
-                    "ID": st.session_state.next_id,
-                    "Colaborador": nome,
-                    "Centro_Custo": centro_custo,
-                    "Data_Despesa": data_despesa,
-                    "Valor": valor,
-                    "Status": "Pendente - Análise Técnico"
-                }
-                st.session_state.db = pd.concat([st.session_state.db, pd.DataFrame([novo_registro])], ignore_index=True)
-                st.session_state.next_id += 1
-                st.success("Solicitação enviada com sucesso!")
+        # Regra de negócio: 90 dias
+        dias_passados = (datetime.now().date() - data_despesa).days
+        if dias_passados > 90:
+            erros.append(f"A despesa ocorreu há {dias_passados} dias. O limite é 90 dias.")
+            
+        if erros:
+            st.error("⚠️ Corrija os erros abaixo para continuar:")
+            for erro in erros: st.warning(f"- {erro}")
+        else:
+            novo_id = len(st.session_state['banco_reembolsos']) + 1
+            novo_registro = {
+                "ID": novo_id,
+                "Colaborador": nome,
+                "Centro de Custo": centro_custo,
+                "Data Despesa": data_despesa.strftime("%d/%m/%Y"),
+                "Tipo": tipo_despesa.split(" - ")[1],
+                "Descrição": descricao,
+                "Valor": valor,
+                "Comprovante": comprovante.name,
+                "Status": "Aguardando Técnico"
+            }
+            # Adiciona ao dataframe na sessão
+            df = st.session_state['banco_reembolsos']
+            st.session_state['banco_reembolsos'] = pd.concat([df, pd.DataFrame([novo_registro])], ignore_index=True)
+            st.success("✅ Solicitação enviada com sucesso! Você pode acompanhar o status com o Técnico Administrativo.")
 
-    st.divider()
-    st.header("Minhas Solicitações")
-    st.dataframe(st.session_state.db)
-
-# -------------------------------------------------------------
-# VISÃO: TÉCNICO ADMINISTRATIVO
-# -------------------------------------------------------------
-elif perfil == "Técnico Administrativo":
-    st.header("Aprovação de Conformidade")
-    pendentes = st.session_state.db[st.session_state.db["Status"] == "Pendente - Análise Técnico"]
+# ==========================================
+# TELA 2: TÉCNICO ADMINISTRATIVO
+# ==========================================
+elif perfil_selecionado == "3. Técnico Administrativo (Conformidade)":
+    st.title("📋 Validação de Conformidade")
+    st.markdown("Analise os comprovantes e a validade das políticas antes de enviar ao Gestor.")
     
-    if pendentes.empty:
-        st.info("Nenhuma solicitação pendente de conferência.")
+    df = st.session_state['banco_reembolsos']
+    pendentes_tec = df[df['Status'] == "Aguardando Técnico"]
+    
+    if pendentes_tec.empty:
+        st.info("Nenhuma solicitação aguardando validação de conformidade no momento.")
     else:
-        st.dataframe(pendentes)
+        st.dataframe(pendentes_tec, use_container_width=True, hide_index=True)
         
-        req_id = st.selectbox("Selecione o ID para avaliar:", pendentes["ID"])
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Aprovar Conformidade (Enviar p/ Gestor)", type="primary"):
-                st.session_state.db.loc[st.session_state.db["ID"] == req_id, "Status"] = "Pendente - Aprovação Gestor"
-                st.success("Aprovado e enviado para o Gestor!")
-                st.rerun()
-        with col2:
-            if st.button("Rejeitar / Solicitar Ajuste"):
-                st.session_state.db.loc[st.session_state.db["ID"] == req_id, "Status"] = "Rejeitado pelo Técnico"
-                st.warning("Solicitação rejeitada.")
-                st.rerun()
+        # Simulação de aprovação
+        id_selecionado = st.selectbox("Selecione o ID para validar:", pendentes_tec['ID'])
+        acao = st.radio("Ação:", ["Validar e Enviar ao Gestor", "Rejeitar (Falta de Documentação)"])
+        
+        if st.button("Executar Ação"):
+            novo_status = "Aguardando Gestor" if "Validar" in acao else "Rejeitado pelo Técnico"
+            idx = df[df['ID'] == id_selecionado].index[0]
+            st.session_state['banco_reembolsos'].at[idx, 'Status'] = novo_status
+            st.success(f"Status do ID {id_selecionado} atualizado para: {novo_status}")
+            st.rerun()
 
-# -------------------------------------------------------------
-# VISÃO: GESTOR
-# -------------------------------------------------------------
-elif perfil == "Gestor":
-    st.header("Aprovação de Despesas")
-    pendentes_gestor = st.session_state.db[st.session_state.db["Status"] == "Pendente - Aprovação Gestor"]
+# ==========================================
+# TELA 3: GESTOR
+# ==========================================
+elif perfil_selecionado == "2. Gestor (Aprovação)":
+    st.title("👔 Aprovação de Centro de Custo")
+    st.markdown("Revise os gastos validados pelo Técnico Administrativo referentes aos seus projetos.")
+    
+    df = st.session_state['banco_reembolsos']
+    pendentes_gestor = df[df['Status'] == "Aguardando Gestor"]
     
     if pendentes_gestor.empty:
-        st.info("Nenhuma solicitação aguardando sua aprovação.")
+        st.info("Nenhuma solicitação aguardando sua aprovação no momento.")
     else:
-        st.dataframe(pendentes_gestor)
+        st.dataframe(pendentes_gestor, use_container_width=True, hide_index=True)
         
-        req_id_gestor = st.selectbox("Selecione o ID para avaliar:", pendentes_gestor["ID"])
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Aprovar Reembolso", type="primary"):
-                st.session_state.db.loc[st.session_state.db["ID"] == req_id_gestor, "Status"] = "Aprovado - Aguardando Pagamento"
-                st.success("Reembolso aprovado e enviado ao Financeiro!")
-                st.rerun()
-        with col2:
-            if st.button("Rejeitar Despesa"):
-                st.session_state.db.loc[st.session_state.db["ID"] == req_id_gestor, "Status"] = "Rejeitado pelo Gestor"
-                st.warning("Despesa rejeitada.")
-                st.rerun()
-
-# -------------------------------------------------------------
-# VISÃO: FINANCEIRO
-# -------------------------------------------------------------
-elif perfil == "Financeiro":
-    st.header("Pagamentos Pendentes")
-    aprovados = st.session_state.db[st.session_state.db["Status"] == "Aprovado - Aguardando Pagamento"]
-    
-    if aprovados.empty:
-        st.info("Nenhum pagamento pendente no momento.")
-    else:
-        st.dataframe(aprovados)
+        id_selecionado = st.selectbox("Selecione o ID para avaliar:", pendentes_gestor['ID'])
+        acao = st.radio("Ação do Gestor:", ["Aprovar Totalmente", "Aprovar Parcialmente", "Rejeitar Pedido"])
         
-        req_id_fin = st.selectbox("Selecione o ID para dar baixa:", aprovados["ID"])
-        if st.button("Confirmar Pagamento e Arquivar", type="primary"):
-            st.session_state.db.loc[st.session_state.db["ID"] == req_id_fin, "Status"] = "Pago e Arquivado"
-            st.success("Pagamento confirmado. Documentos arquivados automaticamente no sistema.")
+        if st.button("Confirmar Decisão"):
+            if "Aprovar" in acao:
+                novo_status = "Aprovado - Aguardando Financeiro"
+            else:
+                novo_status = "Rejeitado pelo Gestor"
+                
+            idx = df[df['ID'] == id_selecionado].index[0]
+            st.session_state['banco_reembolsos'].at[idx, 'Status'] = novo_status
+            st.success(f"Status do ID {id_selecionado} atualizado para: {novo_status}")
             st.rerun()
+
+# ==========================================
+# TELA 4: FINANCEIRO
+# ==========================================
+elif perfil_selecionado == "4. Financeiro (Pagamento)":
+    st.title("💰 Agendamento e Pagamento")
+    st.markdown("Realize o pagamento das solicitações aprovadas pelos gestores.")
+    
+    df = st.session_state['banco_reembolsos']
+    pendentes_fin = df[df['Status'] == "Aprovado - Aguardando Financeiro"]
+    
+    if pendentes_fin.empty:
+        st.info("Nenhuma aprovação pendente de pagamento.")
+    else:
+        st.dataframe(pendentes_fin, use_container_width=True, hide_index=True)
+        
+        id_selecionado = st.selectbox("Selecione o ID para processar pagamento:", pendentes_fin['ID'])
+        
+        if st.button("Confirmar Pagamento e Arquivar"):
+            idx = df[df['ID'] == id_selecionado].index[0]
+            st.session_state['banco_reembolsos'].at[idx, 'Status'] = "Pago e Arquivado"
+            st.success(f"Pagamento do ID {id_selecionado} processado com sucesso!")
+            st.balloons()
+            st.rerun()
+
+    st.divider()
+    st.subheader("Histórico Geral (Visão Financeira/Auditoria)")
+    st.dataframe(df, use_container_width=True, hide_index=True)
